@@ -56,7 +56,8 @@ added a lot of custom libraries and i need to make docs for them too because i f
 <summary>code example from the custom lib</summary>
 
 from NoCRT.H file
-```static inline void NoCRT_memset_nt(void* ptr, int value, size_t num) {
+```
+static inline void NoCRT_memset_nt(void* ptr, int value, size_t num) {
     // for lil buffers NT instructions are bad( (bcuz of cache sheesh)
     // REP STOSB (ERMS) on lil and medium blocks will work fine
     if (num < 4096) {
