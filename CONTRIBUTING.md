@@ -1,0 +1,17 @@
+if you will contribute then try to
+
+DO NOT ADD INSTRUCTIONS(you can add them manually or add them in the AMETHODAPPROVEDALMOSTBYEVERYONE branch) and it's not made rn
+ADD OPTIMIZATIONS(bcuz they're guud)
+DON'T MESS UP WHAT'S WORKING
+DON'T TRY TO ADD SOMETHING THAT ISN'T TESTED AND SLOW
+MAKE CODE AS YOU WANT(in the main branch and in the code style), NO MATTER THIS IS void sheesh(){} OR void sheesh
+{
+}
+WRITE CODE AS YOU WANT(but please make code at least a little bit readable even if this is a complex function)
+DON'T OVERCOMPLICATE SIMPLE FUNCTIONS(only complex or only if needed)
+
+but anyways i don't check code in the repo that often so have fun until i don't or anyone else will notice this
+
+AMETHODAPPROVEDALMOSTBYEVERYONE branch is made for more readable( but slower(( ) code(also without any swears and other non approved by boring rules)
+
+and as Bob Ross was saying "We don't make mistakes, we make happy accidents", but in here WE make mistakes(i don't hate Bob, just saying)
