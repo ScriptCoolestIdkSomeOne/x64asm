@@ -6,7 +6,7 @@ good for it's purpose i guess
 #pragma once
 
 //#include <windows.h> //deleted due to it's heavy butt
-#//include <stdint.h>
+//include <stdint.h>
 //#include <string.h> //deleted due to it's heavy butt
 //#include <stddef.h>
 #include <intrin.h>
