@@ -6,9 +6,9 @@ good for it's purpose i guess
 #pragma once
 
 //#include <windows.h> //deleted due to it's heavy butt
-#include <stdint.h>
+#//include <stdint.h>
 //#include <string.h> //deleted due to it's heavy butt
-#include <stddef.h>
+//#include <stddef.h>
 #include <intrin.h>
 #include "NoCRT.h"
 
@@ -44,12 +44,12 @@ extern "C" {
 #define ALLOC_BITMAP_SIZE ((ALLOC_MAX_BLOCKS + 31) / 32)
 #define ALLOC_ALIGN 16//16-byte alignment (for SSE/AVX), update to 64 for more safety
 
-    static inline size_t ALLOC_ALIGN_UP(size_t size) {
-        return (size + (ALLOC_ALIGN - 1)) & ~((size_t)(ALLOC_ALIGN - 1));
+    static inline NCsize_t ALLOC_ALIGN_UP(NCsize_t size) {
+        return (size + (ALLOC_ALIGN - 1)) & ~((NCsize_t)(ALLOC_ALIGN - 1));
     }
 
-    static inline size_t ALLOC_ALIGN_DOWN(size_t size) {
-        return size & ~((size_t)(ALLOC_ALIGN - 1));
+    static inline NCsize_t ALLOC_ALIGN_DOWN(NCsize_t size) {
+        return size & ~((NCsize_t)(ALLOC_ALIGN - 1));
     }
 
     //ARENA ALLOCATOR Bump Allocator
@@ -59,8 +59,8 @@ extern "C" {
         uint8_t* base;//beginning
         uint8_t* ptr;//current pos
         uint8_t* end;
-        size_t   total;
-        size_t   peak;
+        NCsize_t   total;
+        NCsize_t   peak;
         int      lock;      //0=unlocked, 1=locked (for cooler threads processing)
     } Arena;
     //you're not fucking stupid i think
@@ -76,7 +76,7 @@ extern "C" {
         return 1;
     }
     //initialization with fixed size
-    static int Arena_init_sized(Arena* a, size_t size) {
+    static int Arena_init_sized(Arena* a, NCsize_t size) {
         if (!a) return 0;
         NoCRT_memset(a, 0, sizeof(Arena));
         size = ALLOC_ALIGN_UP(size);
@@ -89,7 +89,7 @@ extern "C" {
         return 1;
     }
     //safe but not fast
-    static void* Arena_alloc(Arena* a, size_t size) {
+    static void* Arena_alloc(Arena* a, NCsize_t size) {
         if (!a || !a->base) return NULL;
         size = ALLOC_ALIGN_UP(size);
 
@@ -104,19 +104,19 @@ extern "C" {
             (long long)new_ptr,
             (long long)old_ptr) != (long long)old_ptr);
 
-        size_t used = (size_t)(new_ptr - a->base);
+        NCsize_t used = (NCsize_t)(new_ptr - a->base);
         if (used > a->peak) a->peak = used;
         return old_ptr;
     }
     //not safe but fast
-    static void* Arena_alloc_fast(Arena* a, size_t size) {
+    static void* Arena_alloc_fast(Arena* a, NCsize_t size) {
         if (!a || !a->base) return NULL;
         size = ALLOC_ALIGN_UP(size);
         uint8_t* p = a->ptr;
         if (p + size > a->end) return NULL;
         a->ptr = p + size;
 
-        size_t used = (size_t)(a->ptr - a->base);
+        NCsize_t used = (NCsize_t)(a->ptr - a->base);
         if (used > a->peak) a->peak = used;
 
         return p;
@@ -132,14 +132,14 @@ extern "C" {
         NoCRT_memset(a, 0, sizeof(Arena));
     }
     //how many memory is used sir?
-    static size_t Arena_used(const Arena* a) {
+    static NCsize_t Arena_used(const Arena* a) {
         if (!a || !a->base) return 0;
-        return (size_t)(a->ptr - a->base);
+        return (NCsize_t)(a->ptr - a->base);
     }
     //how many memory do you have?
-    static size_t Arena_available(const Arena* a) {
+    static NCsize_t Arena_available(const Arena* a) {
         if (!a || !a->base) return 0;
-        return (size_t)(a->end - a->ptr);
+        return (NCsize_t)(a->end - a->ptr);
     }
     //change memory permissions(for jit JIT: RW -> RX)
     static int Arena_protect(Arena* a, DWORD protect) {
@@ -152,9 +152,9 @@ extern "C" {
     //alloc/free objects with the same size
     //O(1) alloc bitmap sheesh possible
     typedef struct {
-        uint8_t* base;
-        uint32_t  used[ALLOC_BITMAP_SIZE];
-        size_t    block_size;
+        NCuint8_t* base;
+        NCuint32_t  used[ALLOC_BITMAP_SIZE];
+        NCsize_t    block_size;
         int       num_blocks;
         int       free_count;
         int       alloc_count;
@@ -162,15 +162,15 @@ extern "C" {
     } BlockAlloc;
 
     //initialize pool block
-    static int BlockAlloc_init(BlockAlloc* b, size_t block_size, int num_blocks) {
+    static int BlockAlloc_init(BlockAlloc* b, NCsize_t block_size, int num_blocks) {
         if (!b) return 0;
         NoCRT_memset(b, 0, sizeof(BlockAlloc));
 
         b->block_size = ALLOC_ALIGN_UP(block_size);
         b->num_blocks = (num_blocks < ALLOC_MAX_BLOCKS) ? num_blocks : ALLOC_MAX_BLOCKS;
 
-        size_t total = b->block_size * b->num_blocks;
-        b->base = (uint8_t*)VirtualAlloc(NULL, total,
+        NCsize_t total = b->block_size * b->num_blocks;
+        b->base = (NCuint8_t*)VirtualAlloc(NULL, total,
             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if (!b->base) return 0;
 
@@ -184,7 +184,7 @@ extern "C" {
 
         //fast finding first free bit through cpu
         for (int word = 0; word < ALLOC_BITMAP_SIZE; word++) {
-            uint32_t w = b->used[word];
+            NCuint32_t w = b->used[word];
             if (w != 0xFFFFFFFF) { //if word contains at least one free bit
 
                 unsigned long bit = 0;
@@ -193,7 +193,7 @@ extern "C" {
                     int index = word * 32 + (int)bit;
                     if (index >= b->num_blocks) return NULL;
 
-                    uint32_t mask = 1U << bit;
+                    NCuint32_t mask = 1U << bit;
 
                     //make block busy
                     b->used[word] |= mask;
@@ -240,7 +240,7 @@ extern "C" {
 
         int word = index / 32;
         int bit = index % 32;
-        uint32_t mask = 1U << bit;
+        NCuint32_t mask = 1U << bit;
 
         if (b->used[word] & mask) {
             b->used[word] &= ~mask;
@@ -251,8 +251,8 @@ extern "C" {
     //get index through variable 
     static int BlockAlloc_index(const BlockAlloc* b, const void* ptr) {
         if (!b || !b->base || !ptr) return -1;
-        ptrdiff_t offset = (const uint8_t*)ptr - b->base;
-        if (offset < 0 || (size_t)offset % b->block_size != 0) return -1;
+        ptrdiff_t offset = (const NCuint8_t*)ptr - b->base;
+        if (offset < 0 || (NCsize_t)offset % b->block_size != 0) return -1;
         int index = (int)(offset / b->block_size);
         return (index < b->num_blocks) ? index : -1;
     }
@@ -272,24 +272,24 @@ extern "C" {
     //temp bufers and stack sheesh i guess
     //O(1) alloc, O(1) free through pop
     typedef struct {
-        uint8_t* base;
-        uint8_t* ptr;
-        uint8_t* end;
-        uint8_t* marks[ALLOC_MAX_BLOCKS];
+        NCuint8_t* base;
+        NCuint8_t* ptr;
+        NCuint8_t* end;
+        NCuint8_t* marks[ALLOC_MAX_BLOCKS];
         int      mark_count;
-        size_t   peak;
+        NCsize_t   peak;
     } StackAlloc;
     static int StackAlloc_init(StackAlloc* s) {
         if (!s) return 0;
         NoCRT_memset(s, 0, sizeof(StackAlloc));
-        s->base = (uint8_t*)VirtualAlloc(NULL, ALLOC_ARENA_SIZE,
+        s->base = (NCuint8_t*)VirtualAlloc(NULL, ALLOC_ARENA_SIZE,
             MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if (!s->base) return 0;
         s->ptr = s->base;
         s->end = s->base + ALLOC_ARENA_SIZE;
         return 1;
     }
-    static void* StackAlloc_alloc(StackAlloc* s, size_t size) {
+    static void* StackAlloc_alloc(StackAlloc* s, NCsize_t size) {
         if (!s || !s->base) return NULL;
         size = ALLOC_ALIGN_UP(size);
         if (s->ptr + size > s->end) return NULL;
@@ -297,7 +297,7 @@ extern "C" {
         void* p = s->ptr;
         s->ptr += size;
 
-        size_t used = (size_t)(s->ptr - s->base);
+        NCsize_t used = (NCsize_t)(s->ptr - s->base);
         if (used > s->peak) s->peak = used;
 
         return p;
@@ -363,7 +363,7 @@ extern "C" {
         NoCRT_memset(j, 0, sizeof(JitArena));
 
         // Use RWX for now to eliminate protection issues
-        j->arena.base = (uint8_t*)VirtualAlloc(NULL, ALLOC_ARENA_SIZE,
+        j->arena.base = (NCuint8_t*)VirtualAlloc(NULL, ALLOC_ARENA_SIZE,
             MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
         if (!j->arena.base) return 0;
 
@@ -375,7 +375,7 @@ extern "C" {
     }
 
     // finalizing sheesh (in E_run/E_finalize)
-    static int JitArena_finalize(JitArena* j, size_t code_size) {
+    static int JitArena_finalize(JitArena* j, NCsize_t code_size) {
         if (!j || j->is_executable) return 0;
         DWORD old;
         // change only used part (well not da full page)
@@ -399,7 +399,7 @@ extern "C" {
     }*/
     //added safety, well if you know when page is writable then uncomment thing
     //that right above that comment
-    static void* JitArena_alloc_code(JitArena* j, size_t size) {
+    static void* JitArena_alloc_code(JitArena* j, NCsize_t size) {
         if (!j) return NULL;
         // If currently executable, make writable first
         if (j->is_executable) {
