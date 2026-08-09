@@ -44,13 +44,21 @@ if (NoCRT_cpu_avx512) {
 */
 
 #define NOCRT_MOD_POW2(x, pow2) ((x) & ((pow2) - 1))
-typedef unsigned long long NCuint64_t;
-typedef unsigned long NCuint32_t;
-typedef unsigned NCuint16_t;
-typedef NCint16_t;
-typedef long NCint32_t;
-typedef long long NCint64_t;
-typedef unsigned long long NCsize_t;
+typedef unsigned __int64 NCuint64_t;   // 64bit (8byte)
+typedef unsigned __int32 NCuint32_t;  // 32bit (4bytes)
+typedef unsigned __int16 NCuint16_t; // 16bits  (2vytes)
+typedef unsigned __int8  NCuint8_t; // 8bit   (1byte)
+typedef                     NCint8_t; //ye
+typedef short               NCint16_t; //ye
+typedef int                 NCint32_t; //ye
+typedef long long           NCint64_t; //ye
+typedef unsigned __int64    NCsize_t;  //works only on x64
+/*FOR FUTURE
+typedef unsigned long long NCuint64_t;//64bit almost everywhere
+typedef unsigned int    NCuint32_t;//32bits on everywhere
+typedef unsigned short  NCuint16_t;//16bit on everywhere
+typedef unsigned char   NCuint8_t; // 8bit everywhere
+*/
 
 typedef char* va_list;
 __declspec(dllimport) int __stdcall WriteConsoleA(void* hConsole, const void* lpBuffer, unsigned long nChars, unsigned long* lpCharsWritten, void* lpReserved);
@@ -1042,7 +1050,7 @@ static inline int NoCRT_ftoa(float value, char* buf, int decimals) {
     char* start = buf;
 
     // -0.0 through bits shit for smth cool
-    NCuint32_t float_bits = *(NCuint32_t*)&value;
+    uint32_t float_bits = *(uint32_t*)&value;
     if (float_bits & 0x80000000) {
         *buf++ = '-';
         float_bits &= 0x7FFFFFFF;
