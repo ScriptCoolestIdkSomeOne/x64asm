@@ -168,16 +168,21 @@ static void P_parse(X64Parser* p, const char* code) {
 
 #define __asm(code, out_ptr) do { \
     if (!g_jit_mem.initialized) JitMemory_init(); \
-    X64Assembler __a; \
-    X64Parser __p; \
-    A_init(&__a); \
-    __p.a = &__a; \
+    static X64Assembler __a; \
+    static X64Parser __p; \
+    static int __initialized = 0; \
+    if (!__initialized) { \
+        A_init(&__a); \
+        __p.a = &__a; \
+        __initialized = 1; \
+    } \
+    size_t __start = E_pos(&__a.base); \
     P_parse(&__p, code); \
-    size_t __sz = E_pos(&__a.base); \
+    size_t __sz = E_pos(&__a.base) - __start; \
     DWORD __old; \
-    VirtualProtect(__a.base.start, __sz, PAGE_EXECUTE_READWRITE, &__old); \
-    FlushInstructionCache(GetCurrentProcess(), __a.base.start, __sz); \
-    (out_ptr) = (void*)__a.base.start; \
+    VirtualProtect(__a.base.start + __start, __sz, PAGE_EXECUTE_READWRITE, &__old); \
+    FlushInstructionCache(GetCurrentProcess(), __a.base.start + __start, __sz); \
+    (out_ptr) = (void*)(__a.base.start + __start); \
 } while(0)
 
 #define __asm_get_code(asm) ((asm)->base.mem)
