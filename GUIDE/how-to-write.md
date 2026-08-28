@@ -23,7 +23,7 @@ idk why but without this huge spaces .md will not just work
     
     //code_arena(arena for RWX/RX), data_arena(arena for data), temp_stack(stack for temp buffers), f16_vec_pool(pool for float16)
     
-    //returns 1 on error and 0 on success
+    //returns 0 on error and 1 on success
     
     if (!JitMemory_init()) {
     
@@ -37,7 +37,7 @@ idk why but without this huge spaces .md will not just work
 
     // X64Assembler structure that has:
     
-    //base (emitter where the bytes are writed), buffer (pointer on the current pos), capacity (size of the initted memory)
+    //base (emitter where the bytes are writed), labels(shitty shit), base.cur is position pointer, base.end - base.start is the size
     
     X64Assembler a; // emitter on the stack
     
@@ -115,7 +115,7 @@ int main() {
 
     // __asm("assembler", &pointer)
     //here we do the inline thingy
-    __asm("mov rax, 42; ret", func); //don't use & because parser sucks
+    __asm("mov rax, 42; ret", func); //don't use & because macro sucks
     /* just makes this line: __asm("mov rax, 42; ret", &func); into
     do {
     // ...
