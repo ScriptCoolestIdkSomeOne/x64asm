@@ -123,7 +123,7 @@ int main() {
     } while(0); */
 
     //calling generated sheesh
-    int result = ((int(*)())func)();  // Приводим к указателю на функцию
+    int result = ((int(*)())func)(); //i forgot how this works
 
     //result
     NoCRT_printf("Result: %d\n", result);   // 42
