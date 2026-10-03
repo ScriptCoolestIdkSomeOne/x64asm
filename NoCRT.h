@@ -48,24 +48,39 @@ typedef unsigned __int64 NCuint64_t;   // 64bit (8byte)
 typedef unsigned __int32 NCuint32_t;  // 32bit (4bytes)
 typedef unsigned __int16 NCuint16_t; // 16bits  (2vytes)
 typedef unsigned __int8  NCuint8_t; // 8bit   (1byte)
-typedef                     NCint8_t; //ye
+typedef __int8              NCint8_t; //ye
 typedef short               NCint16_t; //ye
 typedef int                 NCint32_t; //ye
 typedef long long           NCint64_t; //ye
 typedef unsigned __int64    NCsize_t;  //works only on x64
+#if defined(_WIN64) || defined(__x86_64__) || defined(__ppc64__)
+//x64
+typedef unsigned long long uintptr_t;
+#else
+//x86
+typedef unsigned int uintptr_t;
+#endif
 /*FOR FUTURE
 typedef unsigned long long NCuint64_t;//64bit almost everywhere
 typedef unsigned int    NCuint32_t;//32bits on everywhere
 typedef unsigned short  NCuint16_t;//16bit on everywhere
 typedef unsigned char   NCuint8_t; // 8bit everywhere
 */
+typedef unsigned long NCDWORD;
+
+/*
+* shitty shit shit
+typedef struct { enum { NC_True_val = 1 }; } NC_true_type;
+typedef struct { enum { NC_False_val = 0 }; } NC_false_type;
+*/
+#define NC_TRUE_VALUE 1
+#define NC_FALSE_VALUE 0
 
 typedef char* va_list;
 __declspec(dllimport) int __stdcall WriteConsoleA(void* hConsole, const void* lpBuffer, unsigned long nChars, unsigned long* lpCharsWritten, void* lpReserved);
 __declspec(dllimport) void* __stdcall GetStdHandle(unsigned long nStdHandle);
 #define STD_OUTPUT_HANDLE ((unsigned long)-11)
 
-// 2. Define the macros mapping to MSVC's internal compiler built-ins
 #define va_start(ap, x) __crt_va_start(ap, x)
 #define va_arg(ap, t)   __crt_va_arg(ap, t)
 #define va_end(ap)     __crt_va_end(ap)
@@ -202,18 +217,19 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
     NoCRT_init_cpu_features();
     unsigned char* p = (unsigned char*)ptr;
     unsigned char val8 = (unsigned char)value;
+    NCsize_t remaining = num;
 
     // AVX-512
     if (NoCRT_cpu_avx512) {
         // align to 64 bytes to prevent hardware errors and #GP
-        while (((uintptr_t)p & 63) != 0 && num > 0) {
+        while (((uintptr_t)p & 63) != 0 && remaining > 0) {
             *p++ = val8;
-            num--;
+            remaining--;
         }
 
         // do shit after aligning, i am a dumbass
-        NCsize_t n512 = num >> 9;  // how many blocks with 512 byte(8amount*64byte)
-        NCsize_t rem = num & 511; //what remains after da big blocks
+        NCsize_t n512 = remaining >> 9;  // how many blocks with 512 byte(8amount*64byte)
+        remaining &= 511; //what remains after da big blocks
 
         if (n512) {
             __m512i v = _mm512_set1_epi8((char)value);
@@ -231,7 +247,8 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         //fill what remains with blocks to 64bytes
-        NCsize_t n64 = rem >> 6;
+        NCsize_t n64 = remaining >> 6;
+        remaining &= 63;
         if (n64) {
             __m512i v = _mm512_set1_epi8((char)value);
             for (NCsize_t i = 0; i < n64; i++) {
@@ -241,7 +258,7 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         // give tail to stosb
-        NCsize_t tail = rem & 63;
+        NCsize_t tail = remaining;
         if (tail) {
             __stosb(p, val8, tail);
         }
@@ -249,14 +266,14 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
     //AVX2
     else if (NoCRT_cpu_avx2) {
         //aling to 32bytes
-        while (((uintptr_t)p & 31) != 0 && num > 0) {
+        while (((uintptr_t)p & 31) != 0 && remaining > 0) {
             *p++ = val8;
-            num--;
+            remaining--;
         }
 
         // count after align fuck
-        NCsize_t n256 = num >> 8;  //blocks to 256 bytes(8amount * 32bytes)
-        NCsize_t rem = num & 255;
+        NCsize_t n256 = remaining >> 8;  //blocks to 256 bytes(8amount * 32bytes)
+        remaining &= 255;
 
         if (n256) {
             __m256i v = _mm256_set1_epi8((char)value);
@@ -274,7 +291,8 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         // blocks to 32bytes
-        NCsize_t n32 = rem >> 5;
+        NCsize_t n32 = remaining >> 5;
+        remaining &= 31;
         if (n32) {
             __m256i v = _mm256_set1_epi8((char)value);
             for (NCsize_t i = 0; i < n32; i++) {
@@ -284,7 +302,7 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         // well tail duh
-        NCsize_t tail = rem & 31;
+        NCsize_t tail = remaining;
         if (tail) {
             __stosb(p, val8, tail);
         }
@@ -292,14 +310,14 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
     // SSE2
     else if (NoCRT_cpu_sse2) {
         // align to 16bytes
-        while (((uintptr_t)p & 15) != 0 && num > 0) {
+        while (((uintptr_t)p & 15) != 0 && remaining > 0) {
             *p++ = val8;
-            num--;
+            remaining--;
         }
 
         // do this after aligning damn it
-        NCsize_t n256 = num >> 8;  // blocks to 256bytes(16amount * 16byte)
-        NCsize_t rem = num & 255;
+        NCsize_t n256 = remaining >> 8;  // blocks to 256bytes(16amount * 16byte)
+        remaining &= 255;
 
         if (n256) {
             __m128i v = _mm_set1_epi8((char)value);
@@ -317,7 +335,8 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         //blocks to 16byte
-        NCsize_t n16 = rem >> 4;
+        NCsize_t n16 = remaining >> 4;
+        remaining &= 15;
         if (n16) {
             __m128i v = _mm_set1_epi8((char)value);
             for (NCsize_t i = 0; i < n16; i++) {
@@ -327,14 +346,14 @@ static inline void NoCRT_memset_nt(void* ptr, int value, NCsize_t num) {
         }
 
         //well ye tail
-        NCsize_t tail = rem & 15;
+        NCsize_t tail = remaining;
         if (tail) {
             __stosb(p, val8, tail);
         }
     }
     // old CPU fallback
     else {
-        __stosb(p, val8, num);
+        __stosb(p, val8, remaining);
     }
 
     // finalize well make sure that shit goes to RAM
@@ -566,6 +585,30 @@ static inline int NoCRT_memcmp(const void* a, const void* b, NCsize_t num) {
     return 0;
 }
 
+static inline int NoCRT_memcmp_BL(const void* a, const void* b, size_t n) {
+    const unsigned char* p1 = (const unsigned char*)a;
+    const unsigned char* p2 = (const unsigned char*)b;
+
+    if (n >= 32 && NoCRT_cpu_avx2) {
+        __m256i va = _mm256_loadu_si256((const __m256i*)p1);
+        __m256i vb = _mm256_loadu_si256((const __m256i*)p2);
+
+        // Branchless comparing
+        __m256i cmp = _mm256_cmpeq_epi8(va, vb);
+        int mask = _mm256_movemask_epi8(cmp);
+
+        if (mask != -1) {
+            //find first thingy without branches
+            int diff_pos = __builtin_ctz(~mask);
+            return p1[diff_pos] - p2[diff_pos];
+        }
+    }
+
+    //fallaback
+    while (n-- && *p1 == *p2) { p1++; p2++; }
+    return n == (size_t)-1 ? 0 : *p1 - *p2;
+}
+
 //memchr, finding byte through SIMD
 static inline void* NoCRT_memchr(const void* ptr, int value, NCsize_t num) {
     if (!num) return NULL;
@@ -719,7 +762,7 @@ static inline void* NoCRT_memchr(const void* ptr, int value, NCsize_t num) {
     return dst;
 }*/
 
-// Maximally optimized strncpy with SSE 4-way unrolling
+//SSE shittttt
 //strncpy with SSE optimization - corrected version
 static inline char* NoCRT_strncpy(char* dst, const char* src, NCsize_t n) {
     if (!n) return dst;
@@ -936,6 +979,17 @@ static inline char* NoCRT_strncpy(char* dst, const char* src, size_t n) {
 }
 */
 
+//additional pack shit
+/*int NoCRT_putchar(int character) {
+    char c = (char)character;
+    //unsigned int
+    NCDWORD written;
+    // STD_OUTPUT_HANDLE = (unsigned int)-11
+    void* hStdOut = GetStdHandle((unsigned int)-11);
+    WriteFile(hStdOut, &c, 1, &written, 0);
+    return character;
+}*/
+
 static inline void NoCRT_memmove(void* dst, const void* src, NCsize_t num) {
     if (!num || dst == src) return;
 
@@ -970,7 +1024,9 @@ static inline void* NoCRT_memrchr(const void* ptr, int value, NCsize_t num) {
             end -= 16;
             num -= 16;
 
+            //load 16bytes
             __m128i v = _mm_loadu_si128((const __m128i*)end);
+            //compare bytes: 0xFF where matched 0x00 where not
             int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(v, pattern));
 
             if (mask) {
@@ -1050,7 +1106,7 @@ static inline int NoCRT_ftoa(float value, char* buf, int decimals) {
     char* start = buf;
 
     // -0.0 through bits shit for smth cool
-    uint32_t float_bits = *(uint32_t*)&value;
+    NCuint32_t float_bits = *(NCuint32_t*)&value;
     if (float_bits & 0x80000000) {
         *buf++ = '-';
         float_bits &= 0x7FFFFFFF;
@@ -1110,19 +1166,47 @@ static inline int NoCRT_ftoa(float value, char* buf, int decimals) {
 
 /*
 use pcmpistri instead of cmpeq + movemask for more speed
+
+FIXED:
+_mm_loadu_si128 loads 16bytes inside there 16bytes there's 0(sixth pos) so that mask < 0(mask != 0) and everythin is fine
+om first iteration everythin is alr
+second iteration mask == 0 we write 16bytes but the line was 20bytes and the end of the line was on the 20th pos(4btes)
+we use _mm_storeu_si128 and fuck 12bytes that were in the memory
+so we can prob lose some information
 */
 //STRINGS and INTRINSICS
 //strlen with repne scasb + SIMD
 static inline char* NoCRT_strcpy(char* __restrict dst, const char* __restrict src) {
     char* d = dst;
+    const char* s = src;
 
     NoCRT_init_cpu_features();
 
     if (NoCRT_cpu_sse2) {
         __m128i zero = _mm_setzero_si128();
 
+        // align src to the 16bytes
+        while (((uintptr_t)s & 15) != 0) {
+            *d = *s;
+            if (*s == '\0') {
+                return dst;
+            }
+            d++;
+            s++;
+        }
+        /*
+        //might be cooler on the older cpus and compilers
+        while (((uintptr_t)s & 15) != 0) {
+            if ((*d = *s) == '\0') {
+                return dst;
+            }
+        d++;
+        s++;
+        }
+    */
+
         while (1) {
-            __m128i v = _mm_loadu_si128((const __m128i*)src);
+            __m128i v = _mm_load_si128((const __m128i*)s);
             __m128i null_mask = _mm_cmpeq_epi8(v, zero);
             int mask = _mm_movemask_epi8(null_mask);
 
@@ -1130,26 +1214,26 @@ static inline char* NoCRT_strcpy(char* __restrict dst, const char* __restrict sr
                 // found null, copy up to and including it
                 unsigned long idx;
                 _BitScanForward(&idx, (unsigned long)mask);
-                NCsize_t copy_len = idx + 1;
-                __movsb((unsigned char*)d, (const unsigned char*)src, copy_len);
+                //rememba that this shit copies the line including \0
+                __movsb((unsigned char*)d, (const unsigned char*)s, idx + 1);
                 break;
             }
 
+            // if there is no 0 then just write 16bytes
             _mm_storeu_si128((__m128i*)d, v);
             d += 16;
-            src += 16;
+            s += 16;
         }
         return dst;
     }
 
     // scalar fallback
-    while (*src) *d++ = *src++;
-    *d = '\0';
+    while ((*d++ = *s++));
     return dst;
 }
 
 /*
-POSSIBLE BUG:
+FIXED:
 
 if null terminator is on the first block right after the alignment, then you
 readed 48 fat bytes ahead
@@ -1182,6 +1266,24 @@ static inline NCsize_t NoCRT_strlen(const char* s) {
 
         // cycle to 64 byte per iteration
         while (1) {
+            // check for the end of the page
+            if (((uintptr_t)s & 4095) > (4096 - 64)) {
+                //read other 16bytes
+                while (1) {
+                    __m128i v = _mm_load_si128((const __m128i*)s);
+                    int mask = _mm_movemask_epi8(_mm_cmpeq_epi8(v, zero));
+                    if (mask) {
+                        unsigned long idx;
+                        _BitScanForward(&idx, (unsigned long)mask);
+                        return (NCsize_t)(s - start) + idx;
+                    }
+                    s += 16;
+                    // on the new page(lil 6bit nulled for 64byte),
+                    //go to the fast one
+                    if (((uintptr_t)s & 63) == 0) break;
+                }
+            }
+
             __m128i v0 = _mm_load_si128((const __m128i*)(s));
             __m128i v1 = _mm_load_si128((const __m128i*)(s + 16));
             __m128i v2 = _mm_load_si128((const __m128i*)(s + 32));
@@ -1224,10 +1326,33 @@ static inline NCsize_t NoCRT_strlen(const char* s) {
         }
     }
 
-    //fallback
+    // fallback
     const char* p = s;
     while (*p) p++;
     return (NCsize_t)(p - s);
+}
+
+
+#define NOCRT_HAS_ZERO_BYTE(v) \
+    (((v) - 0x0101010101010101ULL) & ~(v) & 0x8080808080808080ULL)
+
+static inline size_t NoCRT_strlen_safe_swar(const char* str) {
+    const char* p = str;
+    // read per 1 byte until 'p' will be 8 so that everything will be sageeee
+    while (((uintptr_t)p & 7) != 0) {
+        if (*p == '\0') return (size_t)(p - str);
+        p++;
+    }
+    // aligned to the 8bytes READING uint64_t HERE, never ever will go through 4kb bounds
+    while (!NOCRT_HAS_ZERO_BYTE(*(const NCuint64_t*)p)) {
+        p += 8;
+    }
+    // SWAR found blco kwith 8bytes where '\0' is find his index
+    while (*p) {
+        p++;
+    }
+
+    return (size_t)(p - str);
 }
 
 /*
@@ -1268,7 +1393,7 @@ static inline int NoCRT_strcmp(const char* a, const char* b) {
             may be a potential page-crossing fault on b if it's near the end of
             a page
             */
-            // va is safe (aligned), а vb can be not aligned,
+            // va is safe (aligned), ﾐｰ vb can be not aligned,
             // but reading vb is safe for health, until we're not on the end of
             //the line 'a'
             __m128i va = _mm_load_si128((const __m128i*)a); // use load instead of loadu
@@ -1440,6 +1565,8 @@ static inline char* NoCRT_strchr(const char* s, int c) {
 
 static int NoCRT_vsnprintf(char* buf, NCsize_t size, const char* fmt, va_list args) {
     char* p = buf;
+    /* BUGFIX: if size == 0 then end = buf - 1, this is a pointer BEFORE the buffer and while (*f && p < end) will fakn die */
+    if (size == 0) return 0;
     char* end = buf + size - 1;
     const char* f = fmt;
 
@@ -1473,11 +1600,29 @@ static int NoCRT_vsnprintf(char* buf, NCsize_t size, const char* fmt, va_list ar
             NCuint64_t uval = (NCuint64_t)val;
             if (val < 0) {
                 if (p < end) *p++ = '-';
-                uval = (NCuint64_t)(-((NCint64_t)val)); // Безопасное инвертирование через int64
+                uval = (NCuint64_t)(-((NCint64_t)val)); // safe invert through int64 (yes im russian)
             }
             /* into the itoa and not the val, and additional uval */
             p += NoCRT_itoa64(uval, p);
             f += 2;
+        }
+        else if (*f == 'l' && *(f + 1) == 'l' && (*(f + 2) == 'u' || *(f + 2) == 'd')) {
+            char type = *(f + 2); // remmeba 'u' or 'd'
+
+            if (type == 'u') {
+                NCuint64_t uval = va_arg(args, NCuint64_t);
+                p += NoCRT_itoa64(uval, p); // x64 numba
+            }
+            else { //'d' 64bit symbol
+                NCint64_t val = va_arg(args, NCint64_t);
+                NCuint64_t uval = (NCuint64_t)val;
+                if (val < 0) {
+                    if (p < end) *p++ = '-';
+                    uval = (NCuint64_t)(-val);
+                }
+                p += NoCRT_itoa64(uval, p);
+            }
+            f += 3; // go through "llu" or "lld"
         }
         else {
             *p++ = *f++; /* if unknown then just eat it anyways */
@@ -1496,7 +1641,6 @@ int NoCRT_sprintf(char* buf, const char* fmt, ...) {
     return n;
 }
 
-/* snprintf */
 int NoCRT_snprintf(char* buf, NCsize_t size, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
@@ -1516,6 +1660,33 @@ int NoCRT_printf(const char* fmt, ...) {
     WriteConsoleA(h, buf, (unsigned long)n, &written, 0);
     return n;
 }
+
+#define __builtin_inff() (1e30f * 1e30f)
+#define __builtin_inf() (1e300 * 1e300)
+#define __builtin_infl() (1e300L * 1e300L)
+
+// all mantissa bits 1, exponent 127
+#define NCMINFLT          0x1.fffffe p+127F
+//most neg
+#define NCMINFLTNG -0x1.fffffe p+127F
+//opposite
+#define NCFLTMAX          0x1.fffffe p+127F
+//opposite
+#define NCFLTMINNEG -0x1.fffffe p+127F
+//opposite
+#define NCFLTMINPOS 0x1.0 p-126F
+// min subnormal denormalized
+#define NCFLTTRUEMIN     0x0.000002 p-126F
+#define NCFLTEPSILON      0x1.0 p-23F
+#define NCFLTINF          (__builtin_inff())
+#define NCFLTNAN          (__builtin_nanf(""))
+#define NCDBLMAX          0x1.fffffffffffff p+1023
+#define NCDBLMINNEG -0x1.fffffffffffff p+1023
+#define NCDBLMINPOS 0x1.0 p-1022
+#define NCDBLTRUEMIN     0x0.0000000000001 p-1022
+#define NCDBLEPSILON      0x1.0 p-52
+#define NCDBLINF          (__builtin_inf())
+#define NCDBLNAN          (__builtin_nan(""))
 
 
 //#define NULL 0
@@ -1539,7 +1710,8 @@ static inline char* NoCRT_strchr_avx2(const char* s, int c) {
     // so vector reading __m256i never goes out of bounds of a page
     while (((uintptr_t)s & 31) != 0) {
         if (*s == ch) return (char*)s;
-        if (*s == '\0') return (ch == '\0') ? (char*)s : NULL;
+        //not needed cuz if ch == '\0' then if (*s == ch) will go first and return the pointer
+        //if (*s == '\0') return (ch == '\0') ? (char*)s : NULL;
         s++;
     }
 
@@ -1577,7 +1749,7 @@ static inline char* NoCRT_strchr_avx2(const char* s, int c) {
     }
 }
 
-//HASH — CRC32 INTRINSIC
+//HASH 窶・CRC32 INTRINSIC
 static inline NCuint32_t NoCRT_hash32(const void* data, NCsize_t len) {
     NCuint32_t hash = 0;
     const unsigned char* p = (const unsigned char*)data;
@@ -1673,7 +1845,7 @@ static inline int NoCRT_rand(void) {
     NoCRT_rand_seed = NoCRT_rand_seed * 1103515245 + 12345;
     return (int)((NoCRT_rand_seed >> 16) & 0x7FFF);
 }*/
-//RANDOM — RDRAND
+//RANDOM 窶・RDRAND
 // fallaback for every stream (4bytes in sector TLS)
 //static thread_local uint32_t NoCRT_rand_seed = 0x1337FFFF;
 
@@ -1712,6 +1884,28 @@ static inline int NoCRT_rand_strong(void) {
     return (int)(result & 0x7FFFFFFF);
 }
 */
+
+/*__declspec(thread) int NoCRT_rng_state = 0;
+
+static inline int NoCRT_rand(void) {
+    // lazeh seed: if 0 then init through rdrand/rdtsc
+    if (NoCRT_rng_state == 0) {
+        unsigned int seed;
+        if (!_rdrand32_step(&seed)) {
+            seed = (unsigned int)__rdtsc();
+        }
+        NoCRT_rng_state = seed | 1; //state doesn't needs to be 0
+    }
+
+    //cool Xorshift32
+    NCuint32_t x = NoCRT_rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    NoCRT_rng_state = x;
+
+    return (int)(x & 0x7FFFFFFF);
+}*/
 
 //ATOMIC OPERATIONS
 static inline NCint32_t NoCRT_atomic_add(volatile NCint32_t* ptr, NCint32_t val) {
@@ -1949,6 +2143,30 @@ static inline char* NoCRT_strcat(char* dst, const char* src) {
     NoCRT_strcpy(dst + NoCRT_strlen(dst), src);
     return dst;
 }
+
+static inline void NoCRT_tolower_swar8(char* str, size_t len) {
+    char* p = str;
+    char* end = str + (len & ~7); // ROUND UP TO THE 8
+
+    while (p < end) {
+        NCuint64_t v = *(NCuint64_t*)p;
+
+        // calculating mask for bytes that are lying in the 'A'-'Z'
+        NCuint64_t most_sig_bits = (v + 0x3F3F3F3F3F3F3F3FULL) & ~(v + 0x2525252525252525ULL);
+        NCuint64_t mask = (most_sig_bits & 0x8080808080808080ULL) >> 2;
+
+        // add 32 (0x20) only to the uppercasses
+        *(NCuint64_t*)p = v | mask;
+        p += 8;
+    }
+
+    // tails
+    while (p < str + len) {
+        if (*p >= 'A' && *p <= 'Z') *p |= 0x20;
+        p++;
+    }
+}
+
 
 /*static inline char *nocrt_strchr(const char *str, int character)
 {
