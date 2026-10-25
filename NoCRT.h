@@ -454,7 +454,7 @@ static inline void NoCRT_memset64(void* ptr, __m512i val) {
 
 //memcpy chooses the coolest path/way
 static inline void NoCRT_memcpy(void* dst, const void* src, NCsize_t num) {
-    if (num == 0) return;
+    if (num == 0) {_mm256_zeroupper(); return; }
     NoCRT_init_cpu_features();
 
     // for lil blocks (16byte) SSE
@@ -506,6 +506,8 @@ static inline void NoCRT_memcpy(void* dst, const void* src, NCsize_t num) {
         src = (const void*)(s + n32);
         //_mm256_stream_si256((__m256i*)(d + i), _mm256_loadu_si256(s + i));
     }
+
+    //_mm256_zeroupper();
 
     if (NoCRT_cpu_sse2 && num >= 16) {
         NCsize_t n16 = num >> 4;
@@ -599,7 +601,9 @@ static inline int NoCRT_memcmp_BL(const void* a, const void* b, size_t n) {
 
         if (mask != -1) {
             //find first thingy without branches
-            int diff_pos = __builtin_ctz(~mask);
+            //int diff_pos = __builtin_ctz(~mask);
+            unsigned long diff_pos;
+            _BitScanForward(&diff_pos, (unsigned long)(~mask) & 0xFFFFFFFFu);
             return p1[diff_pos] - p2[diff_pos];
         }
     }
@@ -762,7 +766,7 @@ static inline void* NoCRT_memchr(const void* ptr, int value, NCsize_t num) {
     return dst;
 }*/
 
-//SSE shittttt
+// Maximally optimized strncpy with SSE 4-way unrolling
 //strncpy with SSE optimization - corrected version
 static inline char* NoCRT_strncpy(char* dst, const char* src, NCsize_t n) {
     if (!n) return dst;
@@ -1102,6 +1106,23 @@ static inline int NoCRT_itoa64(NCuint64_t value, char* buf) {
     return len;
 }
 
+static inline char* NoCRT_itoa_n(int value, char* p, char* end, int base) {
+    char tmp[36]; char* t = tmp;
+    unsigned int v; int neg = 0;
+    if (value < 0 && base == 10) { neg = 1; v = 0u - (unsigned)value; }
+    else v = (unsigned)value;
+    do { unsigned d = v % (unsigned)base; *t++ = (char)(d < 10 ? '0'+d : 'a'+d-10); v /= (unsigned)base; } while (v);
+    if (neg) *t++ = '-';
+    while (t > tmp && p < end) *p++ = *--t;
+    return p;
+}
+static inline char* NoCRT_itoa64_n(NCuint64_t value, char* p, char* end) {
+    char tmp[24]; char* t = tmp;
+    do { *t++ = (char)('0' + (value % 10)); value /= 10; } while (value);
+    while (t > tmp && p < end) *p++ = *--t;
+    return p;
+}
+
 static inline int NoCRT_ftoa(float value, char* buf, int decimals) {
     char* start = buf;
 
@@ -1206,6 +1227,14 @@ static inline char* NoCRT_strcpy(char* __restrict dst, const char* __restrict sr
     */
 
         while (1) {
+            if (((uintptr_t)s & 4095) > (4096 - 16)) {
+                while (((uintptr_t)s & 4095) != 0) {
+                    *d = *s;
+                    if (*s == '\0') return dst;
+                    d++; s++;
+                }
+                continue;
+            }
             __m128i v = _mm_load_si128((const __m128i*)s);
             __m128i null_mask = _mm_cmpeq_epi8(v, zero);
             int mask = _mm_movemask_epi8(null_mask);
@@ -1389,14 +1418,12 @@ static inline int NoCRT_strcmp(const char* a, const char* b) {
         __m128i zero = _mm_setzero_si128();
 
         while (1) {
-            /*
-            may be a potential page-crossing fault on b if it's near the end of
-            a page
-            */
-            // va is safe (aligned), ﾐｰ vb can be not aligned,
-            // but reading vb is safe for health, until we're not on the end of
-            //the line 'a'
-            __m128i va = _mm_load_si128((const __m128i*)a); // use load instead of loadu
+            if (((uintptr_t)a & 4095) > (4096 - 16) ||
+                ((uintptr_t)b & 4095) > (4096 - 16)) {
+                while (*a && *a == *b) { a++; b++; }
+                return *(unsigned char*)a - *(unsigned char*)b;
+                }
+                __m128i va = _mm_load_si128((const __m128i*)a);
             __m128i vb = _mm_loadu_si128((const __m128i*)b);
 
             //check matches of da bytes
@@ -1525,7 +1552,14 @@ static inline char* NoCRT_strchr(const char* s, int c) {
 
     // anotha cycle
     while (1) {
-        // FIXED: address is safely aligned
+        if (((uintptr_t)s & 4095) > (4096 - 16)) {
+            while (((uintptr_t)s & 4095) != 0) {
+                if (*s == ch) return (char*)s;
+                if (*s == '\0') return (ch == '\0') ? (char*)s : NULL;
+                s++;
+            }
+            continue;
+        }
         __m128i v = _mm_loadu_si128((const __m128i*)s); //not fully tested but use
         __m128i match = _mm_cmpeq_epi8(v, pattern);     //_mm_load_si128 instead
         __m128i nulls = _mm_cmpeq_epi8(v, zero);
@@ -1584,7 +1618,7 @@ static int NoCRT_vsnprintf(char* buf, NCsize_t size, const char* fmt, va_list ar
         }
         else if (*f == 'd' || *f == 'i') {
             int val = va_arg(args, int);
-            p += NoCRT_itoa(val, p, 10);
+            p = NoCRT_itoa_n(val, p, end, 10);
             f++;
         }
         else if (*f == 'c') {
@@ -1600,29 +1634,26 @@ static int NoCRT_vsnprintf(char* buf, NCsize_t size, const char* fmt, va_list ar
             NCuint64_t uval = (NCuint64_t)val;
             if (val < 0) {
                 if (p < end) *p++ = '-';
-                uval = (NCuint64_t)(-((NCint64_t)val)); // safe invert through int64 (yes im russian)
+                uval = (NCuint64_t)(-((NCint64_t)val));
             }
-            /* into the itoa and not the val, and additional uval */
-            p += NoCRT_itoa64(uval, p);
+            p = NoCRT_itoa64_n(uval, p, end);
             f += 2;
         }
         else if (*f == 'l' && *(f + 1) == 'l' && (*(f + 2) == 'u' || *(f + 2) == 'd')) {
-            char type = *(f + 2); // remmeba 'u' or 'd'
-
+            char type = *(f + 2);
             if (type == 'u') {
                 NCuint64_t uval = va_arg(args, NCuint64_t);
-                p += NoCRT_itoa64(uval, p); // x64 numba
-            }
-            else { //'d' 64bit symbol
+                p = NoCRT_itoa64_n(uval, p, end);
+            } else {
                 NCint64_t val = va_arg(args, NCint64_t);
                 NCuint64_t uval = (NCuint64_t)val;
                 if (val < 0) {
                     if (p < end) *p++ = '-';
                     uval = (NCuint64_t)(-val);
                 }
-                p += NoCRT_itoa64(uval, p);
+                p = NoCRT_itoa64_n(uval, p, end);
             }
-            f += 3; // go through "llu" or "lld"
+            f += 3;
         }
         else {
             *p++ = *f++; /* if unknown then just eat it anyways */
@@ -1657,7 +1688,15 @@ int NoCRT_printf(const char* fmt, ...) {
     va_end(args);
     unsigned long written;
     void* h = GetStdHandle(STD_OUTPUT_HANDLE);
-    WriteConsoleA(h, buf, (unsigned long)n, &written, 0);
+    __declspec(dllimport) int __stdcall WriteFile(void*, const void*, unsigned long, unsigned long*, void*);
+    __declspec(dllimport) int __stdcall GetConsoleMode(void*, unsigned long*);
+
+    unsigned long mode;
+    if (GetConsoleMode(h, &mode)) {
+        WriteConsoleA(h, buf, (unsigned long)n, &written, 0);
+    } else {
+        WriteFile(h, buf, (unsigned long)n, &written, NULL);
+    }
     return n;
 }
 
@@ -1695,9 +1734,8 @@ extern int NoCRT_cpu_has_avx2(void);
 
 static inline char* NoCRT_strchr_avx2(const char* s, int c) {
     char ch = (char)c;
-
-    //fallback
-    if (!NoCRT_cpu_has_avx2()) {
+    NoCRT_init_cpu_features();
+    if (!NoCRT_cpu_avx2) {
         while (*s) {
             if (*s == ch) return (char*)s;
             s++;
@@ -1720,7 +1758,14 @@ static inline char* NoCRT_strchr_avx2(const char* s, int c) {
     __m256i zero = _mm256_setzero_si256();
 
     while (1) {
-        //align reading of 32 byte
+        if (((uintptr_t)s & 4095) > (4096 - 32)) {
+            while (((uintptr_t)s & 4095) != 0) {
+                if (*s == ch) return (char*)s;
+                if (*s == '\0') return (ch == '\0') ? (char*)s : NULL;
+                s++;
+            }
+            continue;
+        }
         __m256i v = _mm256_load_si256((const __m256i*)s);
 
         __m256i match = _mm256_cmpeq_epi8(v, pattern);
@@ -2224,6 +2269,16 @@ static inline char* NoCRT_strstr(const char* haystack, const char* needle) {
         __m128i zero = _mm_setzero_si128();
 
         while (1) {
+            if (((uintptr_t)haystack & 4095) > (4096 - 16)) {
+                while (((uintptr_t)haystack & 4095) != 0) {
+                    if (*haystack == '\0') return NULL;
+                    if (*haystack == needle[0] &&
+                        NoCRT_strncmp(haystack, needle, nlen) == 0)
+                        return (char*)haystack;
+                    haystack++;
+                }
+                continue;
+            }
             __m128i v = _mm_load_si128((const __m128i*)haystack);
 
             __m128i nulls = _mm_cmpeq_epi8(v, zero);
