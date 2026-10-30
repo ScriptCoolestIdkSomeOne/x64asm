@@ -458,58 +458,67 @@ extern int NoCRT_cpu_has_fsrm; // REP MOVSB
 static inline void NoCRT_memcpy(void* dst, const void* src, size_t num) {
     if (num == 0) return;
 
-    //0-15byte
+    //branchless scalar
     if (num < 16) {
-        unsigned char* d = (unsigned char*)dst;
-        const unsigned char* s = (const unsigned char*)src;
-
-        //well shit
-        if (num & 8) { *(unsigned __int64*)d = *(const unsigned __int64*)s; d += 8; s += 8; }
-        if (num & 4) { *(unsigned int*)d = *(const unsigned int*)s; d += 4; s += 4; }
-        if (num & 2) { *(unsigned short*)d = *(const unsigned short*)s; d += 2; s += 2; }
-        if (num & 1) { *d = *s; }
+        if (num >= 8) {
+            *(uint64_t*)dst = *(const uint64_t*)src;
+            *(uint64_t*)((char*)dst + num - 8) = *(const uint64_t*)((const char*)src - 8 + num);
+            return;
+        }
+        if (num >= 4) {
+            *(unsigned int*)dst = *(const unsigned int*)src;
+            *(unsigned int*)((char*)dst + num - 4) = *(const unsigned int*)((const char*)src - 4 + num);
+            return;
+        }
+        if (num >= 2) {
+            *(unsigned short*)dst = *(const unsigned short*)src;
+            *(unsigned short*)((char*)dst + num - 2) = *(const unsigned short*)((const char*)src - 2 + num);
+            return;
+        }
+        if (num > 0) {
+            *(unsigned char*)dst = *(const unsigned char*)src;
+        }
         return;
     }
 
-    //16 -31byte
+    // SSE
     if (num < 32) {
         if (NoCRT_cpu_sse2) {
-            //copy first 16bytes and last 16bytes(should work)
             __m128i first = _mm_loadu_si128((const __m128i*)src);
             __m128i last  = _mm_loadu_si128((const __m128i*)((const char*)src + num - 16));
             _mm_storeu_si128((__m128i*)dst, first);
             _mm_storeu_si128((__m128i*)((char*)dst + num - 16), last);
             return;
         }
-        // fallback
         __movsb((unsigned char*)dst, (const unsigned char*)src, num);
         return;
     }
 
-    //32-63byte
+    //AVX2/SSE2
     if (num < 64) {
         if (NoCRT_cpu_avx2) {
-            // copy firt and last 32bytes
             __m256i first = _mm256_loadu_si256((const __m256i*)src);
             __m256i last  = _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32));
             _mm256_storeu_si256((__m256i*)dst, first);
             _mm256_storeu_si256((__m256i*)((char*)dst + num - 32), last);
             return;
         }
-        //SSE
-        __m128i m0 = _mm_loadu_si128((const __m128i*)src);
-        __m128i m1 = _mm_loadu_si128((const __m128i*)((const char*)src + 16));
-        __m128i last = _mm_loadu_si128((const __m128i*)((const char*)src + num - 16));
-        _mm_storeu_si128((__m128i*)dst, m0);
-        _mm_storeu_si128((__m128i*)((char*)dst + 16), m1);
-        _mm_storeu_si128((__m128i*)((char*)dst + num - 16), last);
+        if (NoCRT_cpu_sse2) {
+            __m128i m0 = _mm_loadu_si128((const __m128i*)src);
+            __m128i m1 = _mm_loadu_si128((const __m128i*)((const char*)src + 16));
+            __m128i last = _mm_loadu_si128((const __m128i*)((const char*)src + num - 16));
+            _mm_storeu_si128((__m128i*)dst, m0);
+            _mm_storeu_si128((__m128i*)((char*)dst + 16), m1);
+            _mm_storeu_si128((__m128i*)((char*)dst + num - 16), last);
+            return;
+        }
+        __movsb((unsigned char*)dst, (const unsigned char*)src, num);
         return;
     }
 
-    //64-127byte
+    //AVX512
     if (num < 128) {
         if (NoCRT_cpu_avx512) {
-            //first and last 64bytes
             __m512i first = _mm512_loadu_si512((const __m512i*)src);
             __m512i last  = _mm512_loadu_si512((const __m512i*)((const char*)src + num - 64));
             _mm512_storeu_si512((__m512i*)dst, first);
@@ -517,7 +526,6 @@ static inline void NoCRT_memcpy(void* dst, const void* src, size_t num) {
             return;
         }
         if (NoCRT_cpu_avx2) {
-            //AVX2
             __m256i m0 = _mm256_loadu_si256((const __m256i*)src);
             __m256i m1 = _mm256_loadu_si256((const __m256i*)((const char*)src + 32));
             __m256i last = _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32));
@@ -526,18 +534,32 @@ static inline void NoCRT_memcpy(void* dst, const void* src, size_t num) {
             _mm256_storeu_si256((__m256i*)((char*)dst + num - 32), last);
             return;
         }
+        // SSE
+        if (NoCRT_cpu_sse2) {
+            size_t n16 = num >> 4;
+            for (size_t i = 0; i < n16; i++) {
+                _mm_storeu_si128((__m128i*)dst + i, _mm_loadu_si128((const __m128i*)src + i));
+            }
+            _mm_storeu_si128(
+                (__m128i*)((char*)dst + num - 16),
+                _mm_loadu_si128((const __m128i*)((const char*)src + num - 16))
+            );
+            return;
+        }
+        __movsb((unsigned char*)dst, (const unsigned char*)src, num);
+        return;
     }
 
-    // 128 and higher
-    // Intel IceLake+, AMD Zen3+ only
+    //128bytes and higher
+    //Intel IceLake+, AMD Zen3+(fast short rep movsb)
     if (NoCRT_cpu_has_fsrm) {
         __movsb((unsigned char*)dst, (const unsigned char*)src, num);
         return;
     }
 
-    //cycle
+    //AVX2
     if (NoCRT_cpu_avx2) {
-        size_t n32 = num >> 5; // blocks 32byte
+        size_t n32 = num >> 5; 
         __m256i* d = (__m256i*)dst;
         const __m256i* s = (const __m256i*)src;
 
@@ -545,13 +567,11 @@ static inline void NoCRT_memcpy(void* dst, const void* src, size_t num) {
             _mm256_storeu_si256(d + i, _mm256_loadu_si256(s + i));
         }
 
-        size_t tail = num & 31; //tail 0-31bytes
+        size_t tail = num & 31; 
         if (tail > 0) {
-            //byte by byte is obsolete in this function i guess
-            //copy last 32
             _mm256_storeu_si256(
                 (__m256i*)((char*)dst + num - 32),
-                                _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32))
+                _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32))
             );
         }
         return;
