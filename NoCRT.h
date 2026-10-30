@@ -453,79 +453,111 @@ static inline void NoCRT_memset64(void* ptr, __m512i val) {
 }
 
 //memcpy chooses the coolest path/way
-static inline void NoCRT_memcpy(void* dst, const void* src, NCsize_t num) {
-    if (num == 0) {_mm256_zeroupper(); return; }
-    NoCRT_init_cpu_features();
+extern int NoCRT_cpu_has_fsrm; // REP MOVSB
 
-    // for lil blocks (16byte) SSE
-    // modern cpu's will likely turn this switch into some optimized shit
+static inline void NoCRT_memcpy(void* dst, const void* src, size_t num) {
+    if (num == 0) return;
+
+    //0-15byte
     if (num < 16) {
         unsigned char* d = (unsigned char*)dst;
         const unsigned char* s = (const unsigned char*)src;
 
-        switch (num) {
-        case 1:  *d = *s; return;
-        case 2:  *(NCuint16_t*)d = *(const NCuint16_t*)s; return; // /Ob2 compiler optimizes safe-cast
-        case 4:  *(NCuint32_t*)d = *(const NCuint32_t*)s; return;
-        case 8:  *(NCuint64_t*)d = *(const NCuint64_t*)s; return;
-        default: break;
-        }
-        // for non aligned of what remains (3, 5, 6, 7, 9-15) __movsb will be faster
-        // so the sheesh above can be cooler
-        __movsb(d, s, num);
+        //well shit
+        if (num & 8) { *(unsigned __int64*)d = *(const unsigned __int64*)s; d += 8; s += 8; }
+        if (num & 4) { *(unsigned int*)d = *(const unsigned int*)s; d += 4; s += 4; }
+        if (num & 2) { *(unsigned short*)d = *(const unsigned short*)s; d += 2; s += 2; }
+        if (num & 1) { *d = *s; }
         return;
     }
 
-    // vector sheesh for big bad blocks
-    // NOTICE: for AVX-512 blocks needed are from 128 to 256byte
-    // or cpu can throttle a little bit (AVX throttling)
-    if (NoCRT_cpu_avx512 && num >= 128) {
-        size_t n64 = num >> 6;
-        __m512i* d = (__m512i*)dst;
-        const __m512i* s = (const __m512i*)src;
-        for (size_t i = 0; i < n64; i++) {
-            _mm512_storeu_si512(d + i, _mm512_loadu_si512(s + i));
+    //16 -31byte
+    if (num < 32) {
+        if (NoCRT_cpu_sse2) {
+            //copy first 16bytes and last 16bytes(should work)
+            __m128i first = _mm_loadu_si128((const __m128i*)src);
+            __m128i last  = _mm_loadu_si128((const __m128i*)((const char*)src + num - 16));
+            _mm_storeu_si128((__m128i*)dst, first);
+            _mm_storeu_si128((__m128i*)((char*)dst + num - 16), last);
+            return;
         }
-        num &= 63; // remainig tail
-        if (num == 0) return;
-        dst = (void*)(d + n64);
-        src = (const void*)(s + n64);
-        //_mm512_stream_si512((__m512i*)(d + i), _mm512_loadu_si512(s + i));
+        // fallback
+        __movsb((unsigned char*)dst, (const unsigned char*)src, num);
+        return;
     }
 
-    if (NoCRT_cpu_avx2 && num >= 32) {
-        NCsize_t n32 = num >> 5;
+    //32-63byte
+    if (num < 64) {
+        if (NoCRT_cpu_avx2) {
+            // copy firt and last 32bytes
+            __m256i first = _mm256_loadu_si256((const __m256i*)src);
+            __m256i last  = _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32));
+            _mm256_storeu_si256((__m256i*)dst, first);
+            _mm256_storeu_si256((__m256i*)((char*)dst + num - 32), last);
+            return;
+        }
+        //SSE
+        __m128i m0 = _mm_loadu_si128((const __m128i*)src);
+        __m128i m1 = _mm_loadu_si128((const __m128i*)((const char*)src + 16));
+        __m128i last = _mm_loadu_si128((const __m128i*)((const char*)src + num - 16));
+        _mm_storeu_si128((__m128i*)dst, m0);
+        _mm_storeu_si128((__m128i*)((char*)dst + 16), m1);
+        _mm_storeu_si128((__m128i*)((char*)dst + num - 16), last);
+        return;
+    }
+
+    //64-127byte
+    if (num < 128) {
+        if (NoCRT_cpu_avx512) {
+            //first and last 64bytes
+            __m512i first = _mm512_loadu_si512((const __m512i*)src);
+            __m512i last  = _mm512_loadu_si512((const __m512i*)((const char*)src + num - 64));
+            _mm512_storeu_si512((__m512i*)dst, first);
+            _mm512_storeu_si512((__m512i*)((char*)dst + num - 64), last);
+            return;
+        }
+        if (NoCRT_cpu_avx2) {
+            //AVX2
+            __m256i m0 = _mm256_loadu_si256((const __m256i*)src);
+            __m256i m1 = _mm256_loadu_si256((const __m256i*)((const char*)src + 32));
+            __m256i last = _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32));
+            _mm256_storeu_si256((__m256i*)dst, m0);
+            _mm256_storeu_si256((__m256i*)((char*)dst + 32), m1);
+            _mm256_storeu_si256((__m256i*)((char*)dst + num - 32), last);
+            return;
+        }
+    }
+
+    // 128 and higher
+    // Intel IceLake+, AMD Zen3+ only
+    if (NoCRT_cpu_has_fsrm) {
+        __movsb((unsigned char*)dst, (const unsigned char*)src, num);
+        return;
+    }
+
+    //cycle
+    if (NoCRT_cpu_avx2) {
+        size_t n32 = num >> 5; // blocks 32byte
         __m256i* d = (__m256i*)dst;
         const __m256i* s = (const __m256i*)src;
-        for (NCsize_t i = 0; i < n32; i++) {
+
+        for (size_t i = 0; i < n32; i++) {
             _mm256_storeu_si256(d + i, _mm256_loadu_si256(s + i));
         }
-        num &= 31;
-        if (num == 0) return;
-        dst = (void*)(d + n32);
-        src = (const void*)(s + n32);
-        //_mm256_stream_si256((__m256i*)(d + i), _mm256_loadu_si256(s + i));
-    }
 
-    //_mm256_zeroupper();
-
-    if (NoCRT_cpu_sse2 && num >= 16) {
-        NCsize_t n16 = num >> 4;
-        __m128i* d = (__m128i*)dst;
-        const __m128i* s = (const __m128i*)src;
-        for (NCsize_t i = 0; i < n16; i++) {
-            _mm_storeu_si128(d + i, _mm_loadu_si128(s + i));
+        size_t tail = num & 31; //tail 0-31bytes
+        if (tail > 0) {
+            //byte by byte is obsolete in this function i guess
+            //copy last 32
+            _mm256_storeu_si256(
+                (__m256i*)((char*)dst + num - 32),
+                                _mm256_loadu_si256((const __m256i*)((const char*)src + num - 32))
+            );
         }
-        num &= 15;
-        if (num == 0) return;
-        dst = (void*)(d + n16);
-        src = (const void*)(s + n16);
-        //_mm_stream_si128((__m128i*)(d + i), _mm_loadu_si128(s + i));
+        return;
     }
 
-    // tail (remainings), or just old cpus
-    // if size > 64byte (on old CPUs), ERMS will turn on and it makes it faster
-    // if this lil tail after AVX/SSE, __movsb will work great
+    // fallback
     __movsb((unsigned char*)dst, (const unsigned char*)src, num);
 }
 
